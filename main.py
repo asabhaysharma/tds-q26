@@ -102,8 +102,6 @@ async def get_embedding(text: str):
 
 async def get_llm_response(text: str):
     # Note: Sleep is handled in the main endpoint now to be safe
-    if not OPENAI_API_KEY:
-        return f"Mock AI Response for: {text}"
     try:
         client = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=BASE_URL)
         response = await client.chat.completions.create(
