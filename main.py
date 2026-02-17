@@ -289,6 +289,47 @@ async def analytics():
         "strategies": ["exact match (MD5)", "semantic similarity (Cosine)", "LRU eviction", "TTL expiration"]
     }
 
+
+@app.get("/analytics")
+async def analytics():
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        
+        # 1. Get Traffic Stats
+        cursor.execute("SELECT count(*) FROM request_logs")
+        total_requests = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT count(*) FROM request_logs WHERE event_type='HIT'")
+        cache_hits = cursor.fetchone()[0]
+        
+        # 2. Get Current Cache Size
+        cursor.execute("SELECT count(*) FROM cache_entries")
+        cache_size = cursor.fetchone()[0]
+
+    # 3. Calculate Metrics
+    cache_misses = total_requests - cache_hits
+    hit_rate = (cache_hits / total_requests) if total_requests > 0 else 0.0
+    
+    # 4. Calculate Financial Savings (Per Assignment Specs)
+    # Cost = $0.60 per 1M tokens. Avg request = 800 tokens.
+    cost_per_request = (800 / 1_000_000) * 0.60  # = $0.00048
+    total_savings = cache_hits * cost_per_request
+    
+    return {
+        "hitRate": round(hit_rate, 2),
+        "totalRequests": total_requests,
+        "cacheHits": cache_hits,
+        "cacheMisses": cache_misses,
+        "cacheSize": cache_size,
+        "costSavings": round(total_savings, 4), # Returns e.g. 3.4500
+        "savingsPercent": round(hit_rate * 100, 1),
+        "strategies": [
+            "exact match caching", 
+            "LRU eviction policy", 
+            "TTL-based expiration"
+        ]
+    }
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
