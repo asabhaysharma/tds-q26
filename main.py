@@ -114,7 +114,7 @@ async def get_embedding(text: str):
 
 async def get_llm_response(text: str):
     """Fetch answer from OpenAI (or Mock)."""
-    await asyncio.sleep(1.5)
+    await asyncio.sleep(4.5)
 
     try:
         client = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=BASE_URL)
