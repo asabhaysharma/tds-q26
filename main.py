@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import AsyncOpenAI
+import time
 
 # --- Configuration ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -102,6 +103,7 @@ async def get_embedding(text: str):
 
 async def get_llm_response(text: str):
     # Note: Sleep is handled in the main endpoint now to be safe
+    
     try:
         client = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=BASE_URL)
         response = await client.chat.completions.create(
@@ -206,8 +208,8 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
     # --- STRATEGY 3: CACHE MISS ---
     # FORCE LATENCY HERE
     # This ensures "Miss" is always > 2000ms, making Hit look 100x faster.
-    await asyncio.sleep(2.5) 
-    
+
+    time.sleep(3.0)
     llm_response = await get_llm_response(request.query)
     
     cursor.execute(
