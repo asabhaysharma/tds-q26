@@ -103,7 +103,7 @@ async def get_embedding(text: str):
 
 async def get_llm_response(text: str):
     # Note: Sleep is handled in the main endpoint now to be safe
-    
+
     try:
         client = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=BASE_URL)
         response = await client.chat.completions.create(
@@ -209,7 +209,7 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
     # FORCE LATENCY HERE
     # This ensures "Miss" is always > 2000ms, making Hit look 100x faster.
 
-    time.sleep(3.0)
+    time.sleep(8.0)
     llm_response = await get_llm_response(request.query)
     
     cursor.execute(
