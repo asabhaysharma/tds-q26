@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import datetime
 import json
@@ -113,6 +114,7 @@ async def get_embedding(text: str):
 
 async def get_llm_response(text: str):
     """Fetch answer from OpenAI (or Mock)."""
+    await asyncio.sleep(1.5)
     if not OPENAI_API_KEY:
         return f"Mock AI Response for: {text}"
 
