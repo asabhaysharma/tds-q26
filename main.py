@@ -243,7 +243,7 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         "cacheKey": "MISS-NEW_ENTRY"
     }
 
-@app.get("/analytics")
+@app.post("/analytics")
 async def analytics():
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
