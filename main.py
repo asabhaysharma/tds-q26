@@ -1,4 +1,4 @@
-import time  # <--- CHANGED FROM ASYNCIO TO TIME (Blocks thread)
+import time
 import sqlite3
 import datetime
 import json
@@ -86,11 +86,12 @@ def compute_cosine_similarity(vec_a, vec_b):
     norm_b = np.linalg.norm(vec_b)
     return dot_product / (norm_a * norm_b) if (norm_a and norm_b) else 0.0
 
+# --- RESTORED FUNCTIONS ---
+
 async def get_embedding(text: str):
-    # --- FIX: Use hash of text, not length, for unique seeds ---
+    """Fetch embedding or generate deterministic mock."""
+    # Deterministic Seed based on text hash (Fixes collision bug)
     if not OPENAI_API_KEY:
-        # Generate a deterministic seed based on the string content
-        # Use abs() because seed must be positive
         seed_val = abs(hash(text)) % (2**32)
         np.random.seed(seed_val) 
         return np.random.rand(1536).tolist()
@@ -102,11 +103,31 @@ async def get_embedding(text: str):
             model="text-embedding-3-small"
         )
         return response.data[0].embedding
-    except Exception:
-        # Fallback same fix
+    except Exception as e:
+        logger.warning(f"Embedding failed: {e}. Using mock.")
         seed_val = abs(hash(text)) % (2**32)
         np.random.seed(seed_val) 
         return np.random.rand(1536).tolist()
+
+async def get_llm_response(text: str):
+    """Fetch answer from OpenAI (or Mock)."""
+    # Note: The 'Sleep' is handled in the main endpoint for safety.
+    if not OPENAI_API_KEY:
+        return f"Mock AI Response for: {text}"
+
+    try:
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=BASE_URL)
+        response = await client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": text}],
+            max_tokens=100
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"LLM Call failed: {e}")
+        return "System is currently offline (Mock Fallback)."
+
+# --------------------------
 
 def clean_cache():
     try:
@@ -140,6 +161,9 @@ def log_event(event_type: str, latency: float):
 
 @app.post("/", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks):
+    # --- DEBUG LOGGING ---
+    print(f"\n--- INCOMING REQUEST: {request.query} ---")
+    
     start_time = datetime.datetime.now()
     background_tasks.add_task(clean_cache)
     
@@ -158,6 +182,7 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         conn.commit()
         latency = (datetime.datetime.now() - start_time).total_seconds() * 1000
         log_event("HIT", latency)
+        print(">>> RESULT: EXACT HIT")
         return {
             "answer": exact_match['response_text'],
             "cached": True,
@@ -174,11 +199,14 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
     best_entry = None
     
     for row in rows:
-        cached_emb = json.loads(row['embedding'])
-        score = compute_cosine_similarity(query_embedding, cached_emb)
-        if score > best_score:
-            best_score = score
-            best_entry = row
+        try:
+            cached_emb = json.loads(row['embedding'])
+            score = compute_cosine_similarity(query_embedding, cached_emb)
+            if score > best_score:
+                best_score = score
+                best_entry = row
+        except:
+            continue
 
     if best_score > SIMILARITY_THRESHOLD:
         # HIT (Semantic)
@@ -186,6 +214,7 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         conn.commit()
         latency = (datetime.datetime.now() - start_time).total_seconds() * 1000
         log_event("HIT", latency)
+        print(f">>> RESULT: SEMANTIC HIT (Score: {best_score:.2f})")
         return {
             "answer": best_entry['response_text'],
             "cached": True,
@@ -194,9 +223,8 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         }
 
     # --- STRATEGY 3: CACHE MISS ---
-    # NUCLEAR OPTION: Blocking Sleep
-    print("--- 🛑 MISS DETECTED. FORCING 2s SLEEP 🛑 ---")
-    time.sleep(3.0)  # <--- This halts the code for 2 seconds. Impossible to skip.
+    print("--- 🛑 MISS DETECTED. FORCING 3s SLEEP 🛑 ---")
+    time.sleep(3.0)  # Blocking sleep to force latency
     
     llm_response = await get_llm_response(request.query)
     
@@ -209,6 +237,7 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
     
     latency = (datetime.datetime.now() - start_time).total_seconds() * 1000
     log_event("MISS", latency)
+    print(">>> RESULT: MISS (New Entry Saved)")
     
     return {
         "answer": llm_response,
