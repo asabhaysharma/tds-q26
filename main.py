@@ -1,4 +1,4 @@
-import asyncio
+import time  # <--- CHANGED FROM ASYNCIO TO TIME (Blocks thread)
 import sqlite3
 import datetime
 import json
@@ -12,7 +12,6 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import AsyncOpenAI
-import time
 
 # --- Configuration ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -102,8 +101,8 @@ async def get_embedding(text: str):
         return np.random.rand(1536).tolist()
 
 async def get_llm_response(text: str):
-    # Note: Sleep is handled in the main endpoint now to be safe
-
+    if not OPENAI_API_KEY:
+        return f"Mock AI Response for: {text}"
     try:
         client = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=BASE_URL)
         response = await client.chat.completions.create(
@@ -149,8 +148,6 @@ def log_event(event_type: str, latency: float):
 @app.post("/", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks):
     start_time = datetime.datetime.now()
-    
-    # 1. Background Cleanup (Doesn't slow down request)
     background_tasks.add_task(clean_cache)
     
     query_hash = hashlib.md5(request.query.encode()).hexdigest()
@@ -164,7 +161,6 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
     
     if exact_match:
         # HIT (Exact)
-        # Fast path - NO SLEEP here
         cursor.execute("UPDATE cache_entries SET last_accessed = ? WHERE query_hash = ?", (get_utc_timestamp(), query_hash))
         conn.commit()
         latency = (datetime.datetime.now() - start_time).total_seconds() * 1000
@@ -177,7 +173,6 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         }
 
     # --- STRATEGY 2: SEMANTIC MATCH ---
-    # Fast path - NO SLEEP here
     query_embedding = await get_embedding(request.query)
     cursor.execute("SELECT query_hash, response_text, embedding FROM cache_entries")
     rows = cursor.fetchall()
@@ -206,10 +201,10 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         }
 
     # --- STRATEGY 3: CACHE MISS ---
-    # FORCE LATENCY HERE
-    # This ensures "Miss" is always > 2000ms, making Hit look 100x faster.
-
-    time.sleep(8.0)
+    # NUCLEAR OPTION: Blocking Sleep
+    print("--- 🛑 MISS DETECTED. FORCING 2s SLEEP 🛑 ---")
+    time.sleep(3.0)  # <--- This halts the code for 2 seconds. Impossible to skip.
+    
     llm_response = await get_llm_response(request.query)
     
     cursor.execute(
@@ -242,8 +237,6 @@ async def analytics():
 
     cache_misses = total_requests - cache_hits
     hit_rate = (cache_hits / total_requests) if total_requests > 0 else 0.0
-    
-    # Cost = $0.60 per 1M tokens. Avg request = 800 tokens.
     cost_per_request = (800 / 1_000_000) * 0.60 
     total_savings = cache_hits * cost_per_request
     
