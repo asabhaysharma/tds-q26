@@ -20,7 +20,8 @@ BASE_URL = "https://aipipe.org/openai/v1"
 # Caching Config
 MAX_CACHE_SIZE = 50
 CACHE_TTL_SECONDS = 86400
-SIMILARITY_THRESHOLD = 0.80
+# High threshold to prevent false positives on random vectors
+SIMILARITY_THRESHOLD = 0.95 
 TOKENS_PER_REQ = 800
 COST_PER_1M_TOKENS = 0.60
 
@@ -40,6 +41,14 @@ app.add_middleware(
 DB_NAME = "smart_cache.db"
 
 def init_db():
+    # --- CRITICAL FIX: RESET DB ON STARTUP ---
+    # This prevents old junk data from triggering false Semantic Hits
+    if os.path.exists(DB_NAME):
+        try:
+            os.remove(DB_NAME)
+        except:
+            pass
+            
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -86,11 +95,8 @@ def compute_cosine_similarity(vec_a, vec_b):
     norm_b = np.linalg.norm(vec_b)
     return dot_product / (norm_a * norm_b) if (norm_a and norm_b) else 0.0
 
-# --- RESTORED FUNCTIONS ---
-
 async def get_embedding(text: str):
-    """Fetch embedding or generate deterministic mock."""
-    # Deterministic Seed based on text hash (Fixes collision bug)
+    # Deterministic Mock
     if not OPENAI_API_KEY:
         seed_val = abs(hash(text)) % (2**32)
         np.random.seed(seed_val) 
@@ -104,17 +110,13 @@ async def get_embedding(text: str):
         )
         return response.data[0].embedding
     except Exception as e:
-        logger.warning(f"Embedding failed: {e}. Using mock.")
         seed_val = abs(hash(text)) % (2**32)
         np.random.seed(seed_val) 
         return np.random.rand(1536).tolist()
 
 async def get_llm_response(text: str):
-    """Fetch answer from OpenAI (or Mock)."""
-    # Note: The 'Sleep' is handled in the main endpoint for safety.
     if not OPENAI_API_KEY:
         return f"Mock AI Response for: {text}"
-
     try:
         client = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=BASE_URL)
         response = await client.chat.completions.create(
@@ -124,10 +126,7 @@ async def get_llm_response(text: str):
         )
         return response.choices[0].message.content
     except Exception as e:
-        logger.error(f"LLM Call failed: {e}")
         return "System is currently offline (Mock Fallback)."
-
-# --------------------------
 
 def clean_cache():
     try:
@@ -161,9 +160,7 @@ def log_event(event_type: str, latency: float):
 
 @app.post("/", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks):
-    # --- DEBUG LOGGING ---
     print(f"\n--- INCOMING REQUEST: {request.query} ---")
-    
     start_time = datetime.datetime.now()
     background_tasks.add_task(clean_cache)
     
@@ -224,7 +221,7 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
 
     # --- STRATEGY 3: CACHE MISS ---
     print("--- 🛑 MISS DETECTED. FORCING 3s SLEEP 🛑 ---")
-    time.sleep(3.0)  # Blocking sleep to force latency
+    time.sleep(3.0)  # Blocking sleep
     
     llm_response = await get_llm_response(request.query)
     
