@@ -87,9 +87,14 @@ def compute_cosine_similarity(vec_a, vec_b):
     return dot_product / (norm_a * norm_b) if (norm_a and norm_b) else 0.0
 
 async def get_embedding(text: str):
+    # --- FIX: Use hash of text, not length, for unique seeds ---
     if not OPENAI_API_KEY:
-        np.random.seed(len(text)) 
+        # Generate a deterministic seed based on the string content
+        # Use abs() because seed must be positive
+        seed_val = abs(hash(text)) % (2**32)
+        np.random.seed(seed_val) 
         return np.random.rand(1536).tolist()
+    
     try:
         client = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=BASE_URL)
         response = await client.embeddings.create(
@@ -98,22 +103,10 @@ async def get_embedding(text: str):
         )
         return response.data[0].embedding
     except Exception:
+        # Fallback same fix
+        seed_val = abs(hash(text)) % (2**32)
+        np.random.seed(seed_val) 
         return np.random.rand(1536).tolist()
-
-async def get_llm_response(text: str):
-    if not OPENAI_API_KEY:
-        return f"Mock AI Response for: {text}"
-    try:
-        client = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=BASE_URL)
-        response = await client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": text}],
-            max_tokens=100
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        logger.error(f"LLM Call failed: {e}")
-        return "System is currently offline (Mock Fallback)."
 
 def clean_cache():
     try:
